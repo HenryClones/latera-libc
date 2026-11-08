@@ -7,21 +7,25 @@ This document defines the formal interface contracts, standard taxonomy, type re
 ## 1. Standards Scope & Header Taxonomy
 
 The C standard distinguishes between **hosted** and **freestanding** environments:
-- In **ISO C11** (§4.6), a freestanding environment is only mandated to provide `<float.h>`, `<iso646.h>`, `<limits.h>`, `<stdalign.h>`, `<stdarg.h>`, `<stdbool.h>`, `<stddef.h>`, `<stdint.h>`, and `<stdnoreturn.h>`.
+- In **ISO C11** (§4.6), a freestanding environment relies on the compiler toolchain to provide fundamental freestanding headers (`<float.h>`, `<iso646.h>`, `<limits.h>`, `<stdalign.h>`, `<stdarg.h>`, `<stdbool.h>`, `<stddef.h>`, `<stdint.h>`, and `<stdnoreturn.h>`).
 - In **ISO C23** (§4.6), freestanding requirements are expanded to include `<stdckdint.h>`, `<stdbit.h>`, a constrained subset of `<string.h>`, and an arithmetic/sorting subset of `<stdlib.h>`.
 
 To support bare-metal kernels, embedded micro-runtimes, and user-space concurrency engines without pulling in host dependencies, this specification defines both mandated freestanding headers and select project-supported hosted facilities:
 
 | Header | Standard Category | Specification Scope |
 | :--- | :--- | :--- |
-| `<stddef.h>` | ISO Mandated (C11/C23 Freestanding) | Complete standard types, macros, and constants. |
-| `<stdint.h>` | ISO Mandated (C11/C23 Freestanding) | Complete exact, least, fast, pointer, and greatest-width types, limits, and constant macros. |
-| `<string.h>` | Mandated in C23 Freestanding / Extended in C11 | Memory block operations and string inspection routines. |
+| `<stddef.h>` | ISO Mandated (Freestanding C11) | C11-complete types, macros, and constants (C23 additions like `nullptr_t`/`unreachable()` deferred). |
+| `<stdint.h>` | ISO Mandated (Freestanding C11) | C11-complete exact, least, fast, pointer, and greatest-width types, limits, and constant macros (C23 `*_WIDTH` macros deferred). |
+| `<string.h>` | Mandated in C23 Freestanding / Hosted in C11 | Memory block operations and string inspection routines. |
 | `<stdlib.h>` | Hosted Facility (Select Subset Provided) | Integer arithmetic, numeric parsing, sorting/searching, pluggable dynamic memory contracts, and termination hooks. |
-| `<assert.h>` | Hosted Facility (Diagnostic Facility Provided) | Diagnostic assertion macro, C11/C23 `static_assert` support, multiple inclusion semantics, and pluggable failure hooks. |
+| `<assert.h>` | Hosted Facility (Diagnostic Facility Provided) | Diagnostic assertion macro with dual C11/C23 semantics, multiple inclusion support, and pluggable failure hooks. |
 | `<memory.h>` | Non-Standard Extension | Compatibility header aliasing `<string.h>` memory operations (`memcpy`, `memmove`, `memset`, `memcmp`, `memchr`). |
 
-### 1.1 Core Execution Invariants
+### 1.1 Compiler-Provided Headers & Mandatory Libcall Primitives
+- **Compiler-Provided Freestanding Headers:** In accordance with ISO C freestanding rules, headers defining compiler type representations and machine limits—specifically `<limits.h>`, `<float.h>`, `<stdarg.h>`, `<stdbool.h>`, `<stdalign.h>`, and `<stdnoreturn.h>`—are supplied directly by the compiler toolchain (`gcc`/`clang`). This libc relies on compiler-provided `<limits.h>` for fundamental type limits (`INT_MIN`, `LONG_MAX`, etc.).
+- **Mandatory Compiler Libcall Primitives:** Under `-ffreestanding`, optimizing compilers (such as GCC and Clang) may synthesize calls to `memcpy`, `memmove`, `memset`, and `memcmp` for struct assignments, bulk initializations, and block comparisons. Therefore, a conforming freestanding libc must unconditionally provide these four fundamental primitives.
+
+### 1.2 Core Execution Invariants
 - **Zero Host Syscalls:** Standard library routines never issue direct host operating system syscalls. Any platform interaction (heap expansion, diagnostic reporting, process termination) delegates to pluggable environment hooks or supervisor traps.
 - **Static Resolution Only:** All routines resolve strictly through static linkage (`-static`); dynamic symbol resolution, GOT/PLT indirections, and dynamic shared objects are strictly disallowed.
 - **Zero Host TLS Dependency:** Core routines do not depend on compiler thread-local storage (`_Thread_local` / `__thread`) or host stack-canary TLS layouts (`%fs:0x28`).
@@ -33,9 +37,9 @@ To support bare-metal kernels, embedded micro-runtimes, and user-space concurren
 
 ### 2.1 `<stddef.h>`
 
-Defines fundamental primitive types, constants, and structure offset macros.
+Defines fundamental primitive types, constants, and structure offset macros for freestanding environments.
 
-#### Types
+#### Types (x86-64 LP64)
 - `size_t`: Unsigned integer type of the result of the `sizeof` operator (`unsigned long` on x86-64).
 - `ptrdiff_t`: Signed integer type of the result of subtracting two pointers (`long` on x86-64).
 - `max_align_t`: Type whose alignment requirement is at least as strict as that of every scalar type (`long double` or 16-byte aligned struct on x86-64).
@@ -45,86 +49,112 @@ Defines fundamental primitive types, constants, and structure offset macros.
 - `NULL`: Null pointer constant defined as `((void *)0)` or `0`.
 - `offsetof(type, member)`: Integral constant expression of type `size_t`, evaluating to the offset in bytes from the structure start to `member`.
 
+*Note: C23 additions (`nullptr_t`, `unreachable()`, and `__STDC_VERSION_STDDEF_H__`) are deferred to future revisions.*
+
 ---
 
 ### 2.2 `<stdint.h>`
 
 Defines exact-width, minimum-width, fastest minimum-width, pointer-holding, and greatest-width integer types, along with corresponding limit and constant macros.
 
-#### Exact-Width Integer Types
-- Signed: `int8_t`, `int16_t`, `int32_t`, `int64_t`
-- Unsigned: `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t`
+#### Exact-Width Integer Types (x86-64 LP64)
+- Signed:
+  - `int8_t`: `signed char`
+  - `int16_t`: `short`
+  - `int32_t`: `int`
+  - `int64_t`: `long`
+- Unsigned:
+  - `uint8_t`: `unsigned char`
+  - `uint16_t`: `unsigned short`
+  - `uint32_t`: `unsigned int`
+  - `uint64_t`: `unsigned long`
 
 #### Minimum-Width Integer Types (`int_leastN_t`, `uint_leastN_t`)
-- Signed: `int_least8_t`, `int_least16_t`, `int_least32_t`, `int_least64_t`
-- Unsigned: `uint_least8_t`, `uint_least16_t`, `uint_least32_t`, `uint_least64_t`
+- Signed: `int_least8_t` (`signed char`), `int_least16_t` (`short`), `int_least32_t` (`int`), `int_least64_t` (`long`)
+- Unsigned: `uint_least8_t` (`unsigned char`), `uint_least16_t` (`unsigned short`), `uint_least32_t` (`unsigned int`), `uint_least64_t` (`unsigned long`)
 
 #### Fastest Minimum-Width Integer Types (`int_fastN_t`, `uint_fastN_t`)
-- Signed: `int_fast8_t`, `int_fast16_t`, `int_fast32_t`, `int_fast64_t`
-- Unsigned: `uint_fast8_t`, `uint_fast16_t`, `uint_fast32_t`, `uint_fast64_t`
+- Signed: `int_fast8_t` (`signed char`), `int_fast16_t` (`long`), `int_fast32_t` (`long`), `int_fast64_t` (`long`)
+- Unsigned: `uint_fast8_t` (`unsigned char`), `uint_fast16_t` (`unsigned long`), `uint_fast32_t` (`unsigned long`), `uint_fast64_t` (`unsigned long`)
 
 #### Pointer-Holding & Greatest-Width Types
-- `intptr_t`, `uintptr_t`: Signed/unsigned integer types capable of holding any `void *` pointer without truncation.
-- `intmax_t`, `uintmax_t`: Signed/unsigned integer types of greatest width supported by the target.
+- `intptr_t`, `uintptr_t`: `long`, `unsigned long`
+- `intmax_t`, `uintmax_t`: `long`, `unsigned long`
 
 #### Limit Macros
+Limit macros evaluate to constant expressions of the required promoted type (ISO C11 §7.20.2p1):
 - Exact-width limits:
-  - `INT8_MIN` (`-128`), `INT8_MAX` (`127`), `UINT8_MAX` (`255U`)
-  - `INT16_MIN` (`-32768`), `INT16_MAX` (`32767`), `UINT16_MAX` (`65535U`)
-  - `INT32_MIN` (`-2147483648`), `INT32_MAX` (`2147483647`), `UINT32_MAX` (`4294967295U`)
-  - `INT64_MIN` (`-9223372036854775808LL`), `INT64_MAX` (`9223372036854775807LL`), `UINT64_MAX` (`18446744073709551615ULL`)
+  - `INT8_MIN`: `(-128)` (type `int`)
+  - `INT8_MAX`: `127` (type `int`)
+  - `UINT8_MAX`: `255` (type `int`, matching promotion of `uint8_t`)
+  - `INT16_MIN`: `(-32768)` (type `int`)
+  - `INT16_MAX`: `32767` (type `int`)
+  - `UINT16_MAX`: `65535` (type `int`, matching promotion of `uint16_t`)
+  - `INT32_MIN`: `(-2147483647 - 1)` (type `int`)
+  - `INT32_MAX`: `2147483647` (type `int`)
+  - `UINT32_MAX`: `4294967295U` (type `unsigned int`)
+  - `INT64_MIN`: `(-9223372036854775807L - 1)` (type `long`)
+  - `INT64_MAX`: `9223372036854775807L` (type `long`)
+  - `UINT64_MAX`: `18446744073709551615UL` (type `unsigned long`)
 - Least-width limits: `INT_LEAST8_MIN`/`MAX`, `UINT_LEAST8_MAX`, `INT_LEAST16_MIN`/`MAX`, `UINT_LEAST16_MAX`, `INT_LEAST32_MIN`/`MAX`, `UINT_LEAST32_MAX`, `INT_LEAST64_MIN`/`MAX`, `UINT_LEAST64_MAX`
 - Fast-width limits: `INT_FAST8_MIN`/`MAX`, `UINT_FAST8_MAX`, `INT_FAST16_MIN`/`MAX`, `UINT_FAST16_MAX`, `INT_FAST32_MIN`/`MAX`, `UINT_FAST32_MAX`, `INT_FAST64_MIN`/`MAX`, `UINT_FAST64_MAX`
-- Pointer limits: `INTPTR_MIN`, `INTPTR_MAX`, `UINTPTR_MAX`
-- Greatest-width limits: `INTMAX_MIN`, `INTMAX_MAX`, `UINTMAX_MAX`
+- Pointer limits: `INTPTR_MIN` (`-9223372036854775807L - 1`), `INTPTR_MAX` (`9223372036854775807L`), `UINTPTR_MAX` (`18446744073709551615UL`)
+- Greatest-width limits: `INTMAX_MIN` (`-9223372036854775807L - 1`), `INTMAX_MAX` (`9223372036854775807L`), `UINTMAX_MAX` (`18446744073709551615UL`)
 - Other limits:
-  - `PTRDIFF_MIN`, `PTRDIFF_MAX`
-  - `SIZE_MAX`
-  - `SIG_ATOMIC_MIN`, `SIG_ATOMIC_MAX`
-  - `WCHAR_MIN`, `WCHAR_MAX`
-  - `WINT_MIN`, `WINT_MAX`
+  - `PTRDIFF_MIN` (`-9223372036854775807L - 1`), `PTRDIFF_MAX` (`9223372036854775807L`)
+  - `SIZE_MAX` (`18446744073709551615UL`)
+  - `SIG_ATOMIC_MIN` (`(-2147483647 - 1)`), `SIG_ATOMIC_MAX` (`2147483647`)
+  - `WCHAR_MIN` (`(-2147483647 - 1)`), `WCHAR_MAX` (`2147483647`)
+  - `WINT_MIN` (`0U`), `WINT_MAX` (`4294967295U`)
 
 #### Constant Macros
-- `INT8_C(value)`, `INT16_C(value)`, `INT32_C(value)`, `INT64_C(value)`
-- `UINT8_C(value)`, `UINT16_C(value)`, `UINT32_C(value)`, `UINT64_C(value)`
-- `INTMAX_C(value)`, `UINTMAX_C(value)`
+- `INT8_C(value)`, `INT16_C(value)`: Expand to integer constants of promoted type `int` (`value`)
+- `UINT8_C(value)`, `UINT16_C(value)`: Expand to integer constants of promoted type `int` (`value`)
+- `INT32_C(value)`: `value`
+- `UINT32_C(value)`: `value ## U`
+- `INT64_C(value)`: `value ## L`
+- `UINT64_C(value)`: `value ## UL`
+- `INTMAX_C(value)`: `value ## L`
+- `UINTMAX_C(value)`: `value ## UL`
+
+*Note: C23 additions (`*_WIDTH` macros such as `INT8_WIDTH`, `UINT64_WIDTH`, `SIZE_WIDTH`, etc. and `__STDC_VERSION_STDINT_H__`) are deferred.*
 
 ---
 
 ### 2.3 `<string.h>` & `<memory.h>`
 
-Defines byte-level memory operations and null-terminated string inspection routines. `<memory.h>` is a compatibility extension providing the five standard memory manipulation functions.
+Defines byte-level memory operations and null-terminated string inspection routines. `<memory.h>` is a compatibility extension providing the standard memory manipulation functions.
 
 #### Memory Operations
 ```c
 void *memcpy(void *dest, const void *src, size_t n);
 ```
 - Copies `n` bytes from `src` to `dest`. Memory areas must not overlap.
-- **Edge cases:** When `n == 0`, no bytes are copied and `dest` is returned immediately. `dest` and `src` must be valid pointers when `n > 0`.
+- **Pointer Validity & `n == 0` Semantics:** When `n == 0`, no bytes are copied and `dest` is returned immediately. Under ISO C11/C23 (§7.1.4, §7.24.1p2), passing `NULL` for `dest` or `src` is undefined behavior regardless of `n`.
 
 ```c
 void *memmove(void *dest, const void *src, size_t n);
 ```
 - Copies `n` bytes from `src` to `dest`, safely handling overlapping memory regions.
-- **Edge cases:** When `n == 0`, no bytes are copied and `dest` is returned immediately.
+- **Pointer Validity & `n == 0` Semantics:** When `n == 0`, no bytes are copied and `dest` is returned immediately. Passing `NULL` for `dest` or `src` is undefined behavior regardless of `n`.
 
 ```c
 void *memset(void *s, int c, size_t n);
 ```
 - Sets the first `n` bytes of the memory area `s` to the value `(unsigned char)c`.
-- **Edge cases:** When `n == 0`, no bytes are written and `s` is returned immediately.
+- **Pointer Validity & `n == 0` Semantics:** When `n == 0`, no bytes are written and `s` is returned immediately. Passing `NULL` for `s` is undefined behavior regardless of `n`.
 
 ```c
 int memcmp(const void *s1, const void *s2, size_t n);
 ```
 - Compares the first `n` bytes of `s1` and `s2` as unsigned characters.
-- **Return Value:** Returns `0` if all `n` bytes match (or if `n == 0`); `< 0` if the first differing byte in `s1` is less than `s2`; `> 0` if greater.
+- **Return Value & Pointer Validity:** Returns `0` if all `n` bytes match (or if `n == 0`); `< 0` if the first differing byte in `s1` is less than `s2`; `> 0` if greater. Passing `NULL` for `s1` or `s2` is undefined behavior regardless of `n`.
 
 ```c
 void *memchr(const void *s, int c, size_t n);
 ```
 - Searches the first `n` bytes of `s` for the first occurrence of `(unsigned char)c`.
-- **Return Value:** Pointer to matching byte, or `NULL` if not found (or if `n == 0`).
+- **Return Value & Pointer Validity:** Pointer to matching byte, or `NULL` if not found (or if `n == 0`). Passing `NULL` for `s` is undefined behavior regardless of `n`.
 
 #### String Operations
 ```c
@@ -137,7 +167,7 @@ int strcmp(const char *s1, const char *s2);
 int strncmp(const char *s1, const char *s2, size_t n);
 ```
 - Lexicographically compares null-terminated strings `s1` and `s2` (up to `n` characters for `strncmp`).
-- **Return Value:** `< 0`, `0`, or `> 0` based on `(unsigned char)` character differences. If `n == 0` in `strncmp`, returns `0`.
+- **Return Value & Pointer Validity:** `< 0`, `0`, or `> 0` based on `(unsigned char)` character differences. If `n == 0` in `strncmp`, returns `0`. Passing `NULL` for `s1` or `s2` is undefined behavior.
 
 ```c
 char *strcpy(char *dest, const char *src);
@@ -145,6 +175,7 @@ char *strncpy(char *dest, const char *src, size_t n);
 ```
 - `strcpy`: Copies null-terminated string `src` to `dest` (including `\0`). Returns `dest`.
 - `strncpy`: Copies at most `n` characters. If `strlen(src) < n`, pads remainder of `dest` with null bytes `\0`. If `strlen(src) >= n`, `dest` is not null-terminated. Returns `dest`.
+- **Pointer Validity:** Passing `NULL` for `dest` or `src` is undefined behavior.
 
 ```c
 char *strcat(char *dest, const char *src);
@@ -152,6 +183,7 @@ char *strncat(char *dest, const char *src, size_t n);
 ```
 - `strcat`: Appends `src` to `dest`, overwriting `dest`'s null terminator and adding a new null terminator. Returns `dest`.
 - `strncat`: Appends at most `n` characters from `src` to `dest`, always appending a terminating null byte `\0`. Returns `dest`.
+- **Pointer Validity:** Passing `NULL` for `dest` or `src` is undefined behavior.
 
 ```c
 char *strchr(const char *s, int c);
@@ -180,7 +212,10 @@ long atol(const char *nptr);
 long long atoll(const char *nptr);
 ```
 - Parses initial digits in `nptr` as a base-10 signed integer. Leading whitespace is skipped.
-- **Edge cases & Errors:** If the converted value is out of range, behavior is undefined (consistent with ISO C). Equivalent to `(type)strtol(nptr, (char **)NULL, 10)` without error reporting.
+- `atoi`: Equivalent to `(int)strtol(nptr, (char **)NULL, 10)` without error reporting.
+- `atol`: Equivalent to `strtol(nptr, (char **)NULL, 10)` without error reporting.
+- `atoll`: Equivalent to `strtoll(nptr, (char **)NULL, 10)` without error reporting.
+- **Edge cases & Errors:** If the converted value is out of range, behavior is undefined (consistent with ISO C).
 
 ```c
 long strtol(const char *nptr, char **endptr, int base);
@@ -204,7 +239,7 @@ int abs(int j);
 long labs(long j);
 long long llabs(long long j);
 ```
-- Computes absolute value of integer. Note: `abs(INT_MIN)` produces undefined behavior due to two's complement asymmetry.
+- Computes absolute value of integer. Note: `abs(INT_MIN)`, `labs(LONG_MIN)`, and `llabs(LLONG_MIN)` produce undefined behavior due to two's complement asymmetry.
 
 ```c
 typedef struct { int quot; int rem; } div_t;
@@ -216,7 +251,7 @@ ldiv_t ldiv(long numer, long denom);
 lldiv_t lldiv(long long numer, long long denom);
 ```
 - Computes algebraic quotient and remainder such that `numer = quot * denom + rem`, where `rem` has the same sign as `numer` and `|rem| < |denom|`.
-- **Edge cases:** Division by zero (`denom == 0`) or `INT_MIN / -1` produces undefined behavior / hardware arithmetic trap.
+- **Edge cases:** Division by zero (`denom == 0`) or overflow on dividing minimum value by `-1` (`INT_MIN / -1` for `div`, `LONG_MIN / -1` for `ldiv`, `LLONG_MIN / -1` for `lldiv`) produces undefined behavior / hardware arithmetic trap.
 
 #### Searching & Sorting
 ```c
@@ -239,12 +274,13 @@ void free(void *ptr);
 void *calloc(size_t nmemb, size_t size);
 void *realloc(void *ptr, size_t size);
 ```
-- Dynamic memory management in freestanding libc is mediated by pluggable allocator backends (e.g. bump, slab, or buddy allocators) provided by the host environment or runtime.
+- Dynamic memory management in freestanding libc is mediated by pluggable allocator backends (e.g. bump, slab, or buddy allocators) via the `__libc_heap_sbrk` hook. If no allocator hook is configured or if memory is exhausted, allocation functions deterministically return `NULL`.
 - **Edge cases:**
-  - `malloc(0)` returns `NULL` or a unique non-dereferenceable pointer.
+  - `malloc(0)` returns `NULL`.
   - `free(NULL)` is a safe no-op.
   - `calloc`: Returns zero-initialized memory. If `nmemb * size` overflows `size_t`, fails and returns `NULL`.
-  - `realloc(NULL, size)` is equivalent to `malloc(size)`. `realloc(ptr, 0)` frees `ptr` and returns `NULL`.
+  - `realloc(NULL, size)` is equivalent to `malloc(size)`.
+  - `realloc(ptr, 0)` frees `ptr` and returns `NULL` (explicit implementation choice; note that ISO C23 treats `realloc(ptr, 0)` as undefined behavior).
 
 #### Execution Control & Termination Hooks
 ```c
@@ -260,23 +296,34 @@ _Noreturn void exit(int status);
 
 Defines diagnostic assertion facilities for compile-time and runtime validation.
 
-#### Multiple Inclusion Semantics
+#### Multiple Inclusion Semantics & Version Support
 `<assert.h>` is explicitly designed without standard `#ifndef` include guards. Each time `<assert.h>` is included, it undefines `assert` (`#undef assert`) and redefines it according to the presence or absence of the `NDEBUG` macro at that specific point in the translation unit:
 
 ```c
 #undef assert
 
-#ifdef NDEBUG
-  #define assert(expr) ((void)0)
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+  /* ISO C23: assert is variadic and static_assert is a standard language keyword */
+  #ifdef NDEBUG
+    #define assert(...) ((void)0)
+  #else
+    #define assert(...) \
+        ((__VA_ARGS__) ? (void)0 : __assert_fail(#__VA_ARGS__, __FILE__, __LINE__, __func__))
+  #endif
 #else
-  #define assert(expr) \
-      ((expr) ? (void)0 : __assert_fail(#expr, __FILE__, __LINE__, __func__))
+  /* ISO C11 / C17: assert takes a single expression and static_assert is a macro */
+  #ifdef NDEBUG
+    #define assert(expr) ((void)0)
+  #else
+    #define assert(expr) \
+        ((expr) ? (void)0 : __assert_fail(#expr, __FILE__, __LINE__, __func__))
+  #endif
+
+  #ifndef static_assert
+    #define static_assert _Static_assert
+  #endif
 #endif
 ```
-
-#### C11 vs C23 Diagnostic Interfaces
-- **C11:** Supplies the `static_assert(const_expr, string_literal)` macro mapping to `_Static_assert`.
-- **C23:** `static_assert` is a standard keyword supporting single-argument `static_assert(const_expr)` and two-argument `static_assert(const_expr, string_literal)`. The `assert(...)` macro in C23 permits variable macro arguments.
 
 #### Pluggable Diagnostic Hook Contract
 ```c
@@ -304,8 +351,12 @@ _Noreturn void __assert_fail(const char *assertion, const char *file,
 void *__libc_heap_sbrk(ptrdiff_t increment);
 ```
 
-- **Startup / Entry Point:** Freestanding code compiled with `-nostdlib` contains no standard `_start` or `main` startup wrapper. Execution begins directly at the consumer platform's entry point (e.g. EFI boot service, kernel entry, or fiber entry).
-- **Default Hook Fallbacks:** If a consumer does not provide custom hooks, default weak implementations in libc execute tight halt loops (`for(;;);` / CPU pause / trap instruction) upon `__libc_abort()` or assertion failure.
+### Hook Status, Fallbacks & Lifecycles
+- **`__libc_abort()`**: Weak default implementation executes a portable infinite halt loop (`for (;;) { }`). Consumer platforms (kernel panic handlers, test runners) may override this hook to provide custom abort behavior.
+- **`__libc_exit(int status)`**: Weak default implementation delegates directly to `__libc_abort()`.
+- **`__assert_fail(...)`**: Weak default implementation delegates directly to `__libc_abort()`. Consumer runtimes may override `__assert_fail` to emit diagnostic logging before halting.
+- **`__libc_heap_sbrk(ptrdiff_t increment)`**: Optional weak symbol. If not supplied by consumer (symbol resolves to `NULL`) or if it returns `(void *)-1`, dynamic memory allocation functions (`malloc`, `calloc`, `realloc`) deterministically return `NULL`.
+- **Startup / Entry Point:** Freestanding code compiled with `-nostdlib` contains no standard `_start` or `main` startup wrapper. Execution begins directly at the consumer platform's designated entry point (e.g. EFI entry, kernel entry, or fiber entry).
 
 ---
 

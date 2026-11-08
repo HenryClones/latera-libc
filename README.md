@@ -52,9 +52,9 @@ The specification categorizes headers into mandated ISO freestanding headers, pr
 
 | Header | Standard Category | Description & Supported Scope |
 | :--- | :--- | :--- |
-| `<stddef.h>` | ISO Mandated (Freestanding C11/C23) | Fundamental types (`size_t`, `ptrdiff_t`, `max_align_t`, `wchar_t`), constants (`NULL`), and macros (`offsetof`). |
-| `<stdint.h>` | ISO Mandated (Freestanding C11/C23) | Exact-width, least-width, fast-width, pointer, and maximum-width integer types, limit macros, and constant macros. |
-| `<string.h>` | Mandated in C23 Freestanding / Extended in C11 | Memory manipulation (`memcpy`, `memmove`, `memset`, `memcmp`, `memchr`) and string operations (`strlen`, `strcmp`, `strcpy`, `strcat`, etc.). |
+| `<stddef.h>` | ISO Mandated (Freestanding C11) | Fundamental types (`size_t`, `ptrdiff_t`, `max_align_t`, `wchar_t`), constants (`NULL`), and macros (`offsetof`). |
+| `<stdint.h>` | ISO Mandated (Freestanding C11) | Exact-width, least-width, fast-width, pointer, and maximum-width integer types, limit macros, and constant macros. |
+| `<string.h>` | Mandated in C23 Freestanding / Hosted in C11 | Memory manipulation (`memcpy`, `memmove`, `memset`, `memcmp`, `memchr`) and string operations (`strlen`, `strcmp`, `strcpy`, `strcat`, etc.). |
 | `<stdlib.h>` | ISO Hosted (Selected Facilities Provided) | Integer arithmetic (`abs`, `div`), numeric conversions (`atoi`, `strtol`), searching/sorting (`qsort`, `bsearch`), allocator contracts (`malloc`, `free`), and exit hooks (`abort`, `exit`). |
 | `<assert.h>` | ISO Hosted (Diagnostic Facility Provided) | Diagnostic assertion macros (`assert`, `static_assert`) with redefinition on multiple inclusion and pluggable failure hooks. |
 | `<memory.h>` | Non-Standard Extension (Compatibility) | Compatibility header aliasing standard memory manipulation routines from `<string.h>`. |
