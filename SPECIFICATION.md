@@ -7,25 +7,28 @@ This document defines the formal interface contracts, standard taxonomy, type re
 ## 1. Standards Scope & Header Taxonomy
 
 The C standard distinguishes between **hosted** and **freestanding** environments:
-- In **ISO C11** (§4.6), a freestanding environment relies on the compiler toolchain to provide fundamental freestanding headers (`<float.h>`, `<iso646.h>`, `<limits.h>`, `<stdalign.h>`, `<stdarg.h>`, `<stdbool.h>`, `<stddef.h>`, `<stdint.h>`, and `<stdnoreturn.h>`).
-- In **ISO C23** (§4.6), freestanding requirements are expanded to include `<stdckdint.h>`, `<stdbit.h>`, a constrained subset of `<string.h>`, and an arithmetic/sorting subset of `<stdlib.h>`.
+- In **ISO C11** (clause 4, paragraph 6), a freestanding implementation must provide `<float.h>`, `<iso646.h>`, `<limits.h>`, `<stdalign.h>`, `<stdarg.h>`, `<stdbool.h>`, `<stddef.h>`, `<stdint.h>`, and `<stdnoreturn.h>`. This specification owns `<stddef.h>` and `<stdint.h>` (§1.1); the other seven are supplied by the toolchain.
+- In **ISO C23**, freestanding requirements additionally include `<stdckdint.h>`, `<stdbit.h>`, and further members of `<string.h>`. This specification does **not** claim C23 freestanding conformance: `<stdckdint.h>` and `<stdbit.h>` are explicitly deferred, and the `<string.h>` members in §2.3 are a planned subset only.
 
-To support bare-metal kernels, embedded micro-runtimes, and user-space concurrency engines without pulling in host dependencies, this specification defines both mandated freestanding headers and select project-supported hosted facilities:
+To support bare-metal kernels, embedded micro-runtimes, and user-space concurrency engines without pulling in host dependencies, this specification defines the libc-owned freestanding headers, select project-supported hosted facilities, and one compatibility header:
 
 | Header | Standard Category | Specification Scope |
 | :--- | :--- | :--- |
-| `<stddef.h>` | ISO Mandated (Freestanding C11) | C11-complete types, macros, and constants (C23 additions like `nullptr_t`/`unreachable()` deferred). |
-| `<stdint.h>` | ISO Mandated (Freestanding C11) | C11-complete exact, least, fast, pointer, and greatest-width types, limits, and constant macros (C23 `*_WIDTH` macros deferred). |
-| `<string.h>` | Mandated in C23 Freestanding / Hosted in C11 | Memory block operations and string inspection routines. |
+| `<stddef.h>` | ISO Mandated (Freestanding C11); libc-owned contract | C11-complete types, macros, and constants (C23 additions like `nullptr_t`/`unreachable()` deferred). Must match toolchain ABI (§1.1). |
+| `<stdint.h>` | ISO Mandated (Freestanding C11); libc-owned contract | C11-complete exact, least, fast, pointer, and greatest-width types, limits, and constant macros (C23 `*_WIDTH` macros deferred). Must match toolchain ABI (§1.1). |
+| `<string.h>` | Hosted in C11; planned C23 freestanding subset (not full) | Subset only: memory block operations and string routines listed in §2.3. Remaining `<string.h>` members, including C23 freestanding members `strspn`, `strcspn`, `strpbrk`, `strtok`, `memccpy`, and `memset_explicit`, are deferred. Not a complete freestanding `<string.h>`. |
 | `<stdlib.h>` | Hosted Facility (Select Subset Provided) | Integer arithmetic, numeric parsing, sorting/searching, pluggable dynamic memory contracts, and termination hooks. |
 | `<assert.h>` | Hosted Facility (Diagnostic Facility Provided) | Diagnostic assertion macro with dual C11/C23 semantics, multiple inclusion support, and pluggable failure hooks. |
 | `<memory.h>` | Non-Standard Extension | Compatibility header aliasing `<string.h>` memory operations (`memcpy`, `memmove`, `memset`, `memcmp`, `memchr`). |
+| `<stdckdint.h>`, `<stdbit.h>` | C23 Freestanding (deferred) | Not provided by this libc; no conformance claimed. Use toolchain-supplied copies only where available. |
 
-### 1.1 Compiler-Provided Headers & Mandatory Libcall Primitives
-- **Compiler-Provided Freestanding Headers:** In accordance with ISO C freestanding rules, headers defining compiler type representations and machine limits—specifically `<limits.h>`, `<float.h>`, `<stdarg.h>`, `<stdbool.h>`, `<stdalign.h>`, and `<stdnoreturn.h>`—are supplied directly by the compiler toolchain (`gcc`/`clang`). This libc relies on compiler-provided `<limits.h>` for fundamental type limits (`INT_MIN`, `LONG_MAX`, etc.).
+### 1.1 Header Ownership, Include Precedence & Libcall Primitives
+- **Toolchain-Owned Freestanding Headers:** `<float.h>`, `<iso646.h>`, `<limits.h>`, `<stdalign.h>`, `<stdarg.h>`, `<stdbool.h>`, and `<stdnoreturn.h>` are supplied directly by the compiler toolchain (`gcc`/`clang`) and are not shipped by this libc. This libc relies on the toolchain's `<limits.h>` for fundamental type limits (`INT_MIN`, `LONG_MAX`, etc.).
+- **libc-Owned Freestanding Headers:** `<stddef.h>` and `<stdint.h>` are shipped by this libc; their contracts are defined in §2.1 and §2.2. Their values MUST match the toolchain's x86-64 LP64 ABI. The libc include directory MUST precede the toolchain's builtin freestanding include directory (e.g. `-nostdinc -isystem <libc>/include -isystem <toolchain-include>`). Mixing copies of `<stddef.h>` or `<stdint.h>` from different sources within one translation unit is forbidden.
 - **Mandatory Compiler Libcall Primitives:** Under `-ffreestanding`, optimizing compilers (such as GCC and Clang) may synthesize calls to `memcpy`, `memmove`, `memset`, and `memcmp` for struct assignments, bulk initializations, and block comparisons. Therefore, a conforming freestanding libc must unconditionally provide these four fundamental primitives.
 
 ### 1.2 Core Execution Invariants
+- **Language Standard & Extensions:** Implementations MUST be strictly conforming freestanding ISO C11 or ISO C23 source, built with `-std=c11` or `-std=c23` (`-ffreestanding`; `-pedantic` recommended). GNU dialects (`-std=gnu11`, `-std=gnu23`) are not conforming. The only permitted compiler extension is the weak symbol attribute `__attribute__((weak))` (GCC/Clang), used solely for the optional hooks in §3.
 - **Zero Host Syscalls:** Standard library routines never issue direct host operating system syscalls. Any platform interaction (heap expansion, diagnostic reporting, process termination) delegates to pluggable environment hooks or supervisor traps.
 - **Static Resolution Only:** All routines resolve strictly through static linkage (`-static`); dynamic symbol resolution, GOT/PLT indirections, and dynamic shared objects are strictly disallowed.
 - **Zero Host TLS Dependency:** Core routines do not depend on compiler thread-local storage (`_Thread_local` / `__thread`) or host stack-canary TLS layouts (`%fs:0x28`).
@@ -198,6 +201,7 @@ char *strstr(const char *haystack, const char *needle);
 ```
 - Finds the first occurrence of substring `needle` in `haystack`.
 - **Edge cases:** If `needle` is an empty string (`""`), returns `(char *)haystack`. If `needle` is not found, returns `NULL`.
+- *Deferred:* The C23 qualifier-preserving type-generic forms of `memchr`, `strchr`, `strrchr`, `strstr`, and `bsearch` (N3020) are not provided; the signatures in this section are the C11 forms.
 
 ---
 
@@ -330,7 +334,7 @@ Defines diagnostic assertion facilities for compile-time and runtime validation.
 _Noreturn void __assert_fail(const char *assertion, const char *file,
                              unsigned int line, const char *function);
 ```
-- **Contract:** Invoked when an assertion evaluates to false. A default weak implementation dispatches to `abort()`. Consumer runtimes (kernel, test harnesses, user runtimes) may override `__assert_fail` to output diagnostics to their respective log or supervisor interfaces without tying the libc specification to specific hardware devices.
+- **Contract:** Invoked when an assertion evaluates to false. A default weak implementation calls `__libc_abort()` (§3), the same halt path used by `abort()`. Consumer runtimes (kernel, test harnesses, user runtimes) may override `__assert_fail` to output diagnostics to their respective log or supervisor interfaces without tying the libc specification to specific hardware devices.
 
 ---
 
